@@ -88,7 +88,7 @@ class FeishuClient:
     def add_record(self, app_token, table_id, fields):
         token = self.get_tenant_access_token()
         if not token: return False
-        
+
         url = f"https://open.feishu.cn/open-apis/bitable/v1/apps/{app_token}/tables/{table_id}/records"
         headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=utf-8"}
         payload = {"fields": fields}
@@ -102,6 +102,67 @@ class FeishuClient:
                 return False
         except Exception as e:
             print(f"❌ 请求异常: {e}")
+            return False
+
+    def clear_table(self, app_token, table_id):
+        """清空表格所有记录"""
+        token = self.get_tenant_access_token()
+        if not token: return False
+
+        # 1. 获取所有记录
+        list_url = f"https://open.feishu.cn/open-apis/bitable/v1/apps/{app_token}/tables/{table_id}/records"
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=utf-8"}
+
+        try:
+            # 获取所有记录（分页获取）
+            all_records = []
+            page_token = ""
+            while True:
+                params = {"page_size": 500}  # 每次最多500条
+                if page_token:
+                    params["page_token"] = page_token
+
+                response = requests.get(list_url, headers=headers, params=params)
+                resp_data = response.json()
+
+                if resp_data.get("code") != 0:
+                    print(f"❌ 获取记录失败: {resp_data.get('msg')}")
+                    return False
+
+                records = resp_data.get("data", {}).get("items", [])
+                all_records.extend(records)
+
+                # 检查是否还有下一页
+                has_more = resp_data.get("data", {}).get("has_more", False)
+                page_token = resp_data.get("data", {}).get("page_token", "")
+                if not has_more or not page_token:
+                    break
+
+            if not all_records:
+                print("ℹ️ 表格已经是空的")
+                return True
+
+            # 2. 批量删除记录（最多100条一批）
+            delete_url = f"https://open.feishu.cn/open-apis/bitable/v1/apps/{app_token}/tables/{table_id}/records/batch_delete"
+            batch_size = 100
+
+            for i in range(0, len(all_records), batch_size):
+                batch = all_records[i:i + batch_size]
+                record_ids = [record["record_id"] for record in batch]
+
+                payload = {"records": record_ids}
+                response = requests.post(delete_url, headers=headers, json=payload)
+                resp_data = response.json()
+
+                if resp_data.get("code") != 0:
+                    print(f"❌ 删除批次 {i//batch_size + 1} 失败: {resp_data.get('msg')}")
+                    return False
+
+            print(f"✅ 成功清空表格，共删除 {len(all_records)} 条记录")
+            return True
+
+        except Exception as e:
+            print(f"❌ 清空表格异常: {e}")
             return False
 
 # ==========================================
@@ -423,35 +484,35 @@ def main():
 
     # 1. 交行产品
     print("📂 加载交行产品代码...")
-    bocom_codes = load_product_codes("/Users/cyhuang/Desktop/curl/交行产品代码.txt")
+    bocom_codes = load_product_codes("交行产品代码.txt")
     for c in bocom_codes:
         d = info_map.get(c, {})
         tasks.append((query_bocom(c, d.get('confirm_date'), d.get('redeem_date')), d.get('confirm_date')))
 
     # 2. 民生产品
     print("📂 加载民生产品代码...")
-    cmbc_codes = load_product_codes("/Users/cyhuang/Desktop/curl/民生产品代码.txt")
+    cmbc_codes = load_product_codes("民生产品代码.txt")
     for c in cmbc_codes:
         d = info_map.get(c, {})
         tasks.append((query_cmbc_fuzhu(c, c, d.get('confirm_date'), d.get('redeem_date')), d.get('confirm_date')))
 
     # 3. 易方达产品
     print("📂 加载易方达产品代码...")
-    efunds_codes = load_product_codes("/Users/cyhuang/Desktop/curl/易方达产品代码.txt")
+    efunds_codes = load_product_codes("易方达产品代码.txt")
     for c in efunds_codes:
         d = info_map.get(c, {})
         tasks.append((query_efunds_yizeng(c, d.get('confirm_date'), d.get('redeem_date')), d.get('confirm_date')))
 
     # 4. 中信银行产品
     print("📂 加载中信银行产品代码...")
-    citic_codes = load_product_codes("/Users/cyhuang/Desktop/curl/中信银行产品代码.txt")
+    citic_codes = load_product_codes("中信银行产品代码.txt")
     for c in citic_codes:
         d = info_map.get(c, {})
         tasks.append((query_citic_wealth(c, d.get('confirm_date'), d.get('redeem_date')), d.get('confirm_date')))
 
     # 5. 杭银产品
     print("📂 加载杭银产品代码...")
-    hzbank_codes = load_product_codes("/Users/cyhuang/Desktop/curl/杭银产品代码.txt")
+    hzbank_codes = load_product_codes("杭银产品代码.txt")
     for c in hzbank_codes:
         d = info_map.get(c, {})
         tasks.append((query_hzbank(c, c, d.get('confirm_date'), d.get('redeem_date')), d.get('confirm_date')))
@@ -461,7 +522,17 @@ def main():
     boc_dates = info_map.get("2501240100", {})
     tasks.append((query_boc_niannianxin(boc_dates.get('confirm_date'), boc_dates.get('redeem_date')), boc_dates.get('confirm_date')))
 
+    # ==========================================
+    # 在写入数据前，先清空表格
+    # ==========================================
+    print("\n🧹 清空飞书表格...")
+    if not feishu.clear_table(FEISHU_CONFIG["APP_TOKEN"], FEISHU_CONFIG["TABLE_ID"]):
+        print("❌ 清空表格失败，程序终止")
+        return
+    print()
+
     # 执行所有任务并写入飞书
+    print("📤 开始写入数据到飞书...")
     for (res, specific_c_date) in tasks:
         code, cur, prior, date_obj, pur, red = res
         if isinstance(cur, (int, float)) and date_obj:
@@ -480,6 +551,8 @@ def main():
             feishu.add_record(FEISHU_CONFIG["APP_TOKEN"], FEISHU_CONFIG["TABLE_ID"], fields)
         else:
             print(f"⚠️ 跳过: {code} (获取失败或格式错误)")
+
+    print("\n✅ 所有数据写入完成！")
 
 if __name__ == "__main__":
     main()
