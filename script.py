@@ -169,6 +169,10 @@ class FeishuClient:
 # 工具函数
 # ==========================================
 def load_purchase_dates(filename="购入日期.txt"):
+    """
+    从文件加载购入日期信息
+    支持一个产品多个购买日期，返回字典，值为列表
+    """
     info_map = {}
     if not os.path.exists(filename):
         print(f"⚠️ 警告: 未找到 {filename}，请确保已将此文件上传到 GitHub 仓库根目录。")
@@ -186,7 +190,11 @@ def load_purchase_dates(filename="购入日期.txt"):
                             try:
                                 r_date = datetime.datetime.strptime(parts[2].strip(), "%Y-%m-%d").date()
                             except: pass
-                        info_map[code] = {'confirm_date': c_date, 'redeem_date': r_date}
+
+                        # 使用列表存储多个购买日期
+                        if code not in info_map:
+                            info_map[code] = []
+                        info_map[code].append({'confirm_date': c_date, 'redeem_date': r_date})
                     except: pass
     except Exception as e:
         print(f"读取文件错误: {e}")
@@ -486,41 +494,67 @@ def main():
     print("📂 加载交行产品代码...")
     bocom_codes = load_product_codes("交行产品代码.txt")
     for c in bocom_codes:
-        d = info_map.get(c, {})
-        tasks.append((query_bocom(c, d.get('confirm_date'), d.get('redeem_date')), d.get('confirm_date')))
+        dates_list = info_map.get(c, [])
+        if dates_list:
+            # 有购买日期，每个日期都生成一个任务
+            for d in dates_list:
+                tasks.append((query_bocom(c, d.get('confirm_date'), d.get('redeem_date')), d.get('confirm_date')))
+        else:
+            # 没有购买日期，仍然要查询（获取最新净值）
+            tasks.append((query_bocom(c, None, None), None))
 
     # 2. 民生产品
     print("📂 加载民生产品代码...")
     cmbc_codes = load_product_codes("民生产品代码.txt")
     for c in cmbc_codes:
-        d = info_map.get(c, {})
-        tasks.append((query_cmbc_fuzhu(c, c, d.get('confirm_date'), d.get('redeem_date')), d.get('confirm_date')))
+        dates_list = info_map.get(c, [])
+        if dates_list:
+            for d in dates_list:
+                tasks.append((query_cmbc_fuzhu(c, c, d.get('confirm_date'), d.get('redeem_date')), d.get('confirm_date')))
+        else:
+            tasks.append((query_cmbc_fuzhu(c, c, None, None), None))
 
     # 3. 易方达产品
     print("📂 加载易方达产品代码...")
     efunds_codes = load_product_codes("易方达产品代码.txt")
     for c in efunds_codes:
-        d = info_map.get(c, {})
-        tasks.append((query_efunds_yizeng(c, d.get('confirm_date'), d.get('redeem_date')), d.get('confirm_date')))
+        dates_list = info_map.get(c, [])
+        if dates_list:
+            for d in dates_list:
+                tasks.append((query_efunds_yizeng(c, d.get('confirm_date'), d.get('redeem_date')), d.get('confirm_date')))
+        else:
+            tasks.append((query_efunds_yizeng(c, None, None), None))
 
     # 4. 中信银行产品
     print("📂 加载中信银行产品代码...")
     citic_codes = load_product_codes("中信银行产品代码.txt")
     for c in citic_codes:
-        d = info_map.get(c, {})
-        tasks.append((query_citic_wealth(c, d.get('confirm_date'), d.get('redeem_date')), d.get('confirm_date')))
+        dates_list = info_map.get(c, [])
+        if dates_list:
+            for d in dates_list:
+                tasks.append((query_citic_wealth(c, d.get('confirm_date'), d.get('redeem_date')), d.get('confirm_date')))
+        else:
+            tasks.append((query_citic_wealth(c, None, None), None))
 
     # 5. 杭银产品
     print("📂 加载杭银产品代码...")
     hzbank_codes = load_product_codes("杭银产品代码.txt")
     for c in hzbank_codes:
-        d = info_map.get(c, {})
-        tasks.append((query_hzbank(c, c, d.get('confirm_date'), d.get('redeem_date')), d.get('confirm_date')))
+        dates_list = info_map.get(c, [])
+        if dates_list:
+            for d in dates_list:
+                tasks.append((query_hzbank(c, c, d.get('confirm_date'), d.get('redeem_date')), d.get('confirm_date')))
+        else:
+            tasks.append((query_hzbank(c, c, None, None), None))
 
     # 6. 中行 (固定产品)
     print("📂 加载中行产品...")
-    boc_dates = info_map.get("2501240100", {})
-    tasks.append((query_boc_niannianxin(boc_dates.get('confirm_date'), boc_dates.get('redeem_date')), boc_dates.get('confirm_date')))
+    boc_dates_list = info_map.get("2501240100", [])
+    if boc_dates_list:
+        for d in boc_dates_list:
+            tasks.append((query_boc_niannianxin(d.get('confirm_date'), d.get('redeem_date')), d.get('confirm_date')))
+    else:
+        tasks.append((query_boc_niannianxin(None, None), None))
 
     # ==========================================
     # 在写入数据前，先清空表格
