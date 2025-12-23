@@ -337,10 +337,64 @@ def query_hzbank(product_code, product_name=None, purchase_date=None, redeem_dat
     """杭银理财"""
     if not product_name:
         product_name = product_code
-    # 注意：这里需要根据杭银的实际API调整URL和请求方式
-    # 目前暂时返回错误信息，提示需要实现
-    print(f"⚠️ 杭银理财查询功能待实现 (产品代码: {product_code})")
-    return product_name, "Not Implemented", "Not Implemented", None, 0, 0
+
+    # 将产品代码转换为小写构建URL
+    product_code_lower = product_code.lower()
+    url = f'http://www.hzbankwealth.cn/content/detail/{product_code_lower}_netval.json'
+
+    headers = {
+        'Accept': 'application/json, text/javascript, */*; q=0.01',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        'Connection': 'keep-alive',
+        'Referer': f'http://www.hzbankwealth.cn/content/detail/{product_code}.html',
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
+        'X-Requested-With': 'XMLHttpRequest'
+    }
+
+    try:
+        response = requests.get(url, headers=headers, verify=False, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+
+        if not data:
+            return product_name, "No Data", "No Data", None, 0, 0
+
+        # 数据按日期排序
+        date_fmt = "%Y-%m-%d"
+        data.sort(key=lambda x: datetime.datetime.strptime(x['date'], date_fmt))
+
+        # 获取最新数据
+        latest_item = data[-1]
+        latest_date_obj = datetime.datetime.strptime(latest_item['date'], date_fmt)
+        latest_net_value = float(latest_item['net_value'])
+
+        # 计算30天前的日期
+        target_date_obj = latest_date_obj - datetime.timedelta(days=30)
+
+        # 查找30天前的数据（顺延逻辑）
+        comparison_item = None
+        for item in data:
+            current_item_date = datetime.datetime.strptime(item['date'], date_fmt)
+            if current_item_date >= target_date_obj:
+                comparison_item = item
+                break
+
+        # 如果没有找到，使用第一条数据
+        if not comparison_item and data:
+            comparison_item = data[0]
+
+        prior_nav = float(comparison_item['net_value']) if comparison_item else 0
+
+        # 构造数据格式
+        clean_data = [{'date': datetime.datetime.strptime(item['date'], date_fmt).date(), 'nav': float(item['net_value'])} for item in data]
+
+        return (product_name, latest_net_value, prior_nav, latest_date_obj.date(),
+                get_nav_for_date(clean_data, purchase_date),
+                get_nav_for_date(clean_data, redeem_date))
+
+    except Exception as e:
+        print(f"杭银理财异常 ({product_code}): {e}")
+        return product_name, "Error", "Error", None, 0, 0
 
 def query_boc_niannianxin(purchase_date=None, redeem_date=None):
     """中行"""
